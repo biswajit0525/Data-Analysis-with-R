@@ -1,0 +1,262 @@
+---
+title: "ModelVis - Regression"
+output:
+  html_notebook: default
+  html_document: default
+---
+
+## Model Visualisation
+
+- [0] Visualise the *data space*
+- [1] Visualise the *predictions in the data space*
+- [2] Visualise the *errors in model fitting*
+- [3] Visualise with *different model parameters*
+- [4] Visualise with *different input datasets*
+- [5] Visualise the *entire model space*
+- [6] Visualise the *entire feature space*
+- [7] Visualise the *many models together*
+
+
+## Load the libraries
+
+```{r}
+library(broom)
+library(MASS)
+library(tidyverse)
+library(ggthemes)
+library(plotly)
+library(modelr)
+library(DT)
+library(glmnet)
+library(ggrepel)
+library(dplyr)
+library(tidyverse)
+```
+
+
+## Set the theme
+
+```{r}
+library(ggplot2)
+notebook_theme <- theme_fivethirtyeight() + 
+         theme( axis.title = element_text(), legend.position = "right",
+                  legend.direction = "vertical")
+theme_set(notebook_theme)
+```
+
+## Read the data
+
+```{r}
+setwd("D:/Analytics/Visualization")
+cars <- read.csv("cars.csv")
+head(cars)
+# datatable(cars, options = list())
+```
+
+## [0] Visualise the data space
+
+```{r}
+p0 <- ggplot(cars) + aes(kmpl, price, color = type) + geom_point(size = 3)
+p0
+```
+
+Showing with label names
+
+```{r}
+cars$label = paste(cars$brand, cars$model)
+
+set.seed(42)
+p0_label <- ggplot(cars) + aes(kmpl, price, color = type) + 
+  geom_point(size = 3) +
+  geom_text_repel( aes(kmpl, price, label = label ), size = 2.5)
+p0_label
+
+```
+
+
+
+## [1] Visualise the prediction in the data space
+
+Lets make a simple OLS model
+
+```{r}
+lmfit <- lm (price ~ kmpl + type, cars)
+lmfit
+
+grid <- cars %>%
+  data_grid(kmpl = seq_range(kmpl, 200), type)
+
+str(grid)
+
+lm_grid <- grid %>%
+  add_predictions(lmfit, "lm_pred")
+head(lm_grid)
+```
+
+# Show the prediction in the same data space
+
+```{r}
+p1 <- ggplot(cars, aes(kmpl, price, color=type)) + 
+  geom_point(size = 3) + 
+  geom_line(aes(y=lm_pred, color= type), data = lm_grid, size = 1.5)
+
+p1
+
+```
+
+
+## [2] Visualise the Errors in Model Fitting
+
+```{r}
+cars <- cars %>% 
+  add_residuals(lmfit, "lm_resid")
+
+
+p2 <- ggplot(cars, aes(kmpl, lm_resid, color = type, fill=type)) + 
+  geom_point( size = 2) +
+  geom_bar(stat="identity", alpha =0.5) +
+  facet_wrap(~type)
+p2
+```
+
+
+```{r}
+p2_alt <- ggplot(cars, aes(kmpl, price, color = type)) + 
+  geom_point( size = 1) +
+  geom_point( aes(size=abs(lm_resid)), color="red", fill = "white", alpha = 0.2)
+p2_alt
+```
+
+
+## [3] Visualise with *different model parameters*
+
+```{r}
+x <- cars %>% 
+  model_matrix(price ~ kmpl + type) %>%
+  as.matrix()
+
+y <- as.double(cars$price)
+
+glm <- cv.glmnet(x, y, alpha= 0.5, standardize=FALSE)
+
+x_grid <- grid %>%
+  model_matrix( ~ kmpl + type) %>%
+  as.matrix()
+
+glm_pred_min <- predict(glm,x_grid,s="lambda.min") %>%
+  as.data.frame() 
+colnames(glm_pred_min)[1] <- "glm_min"
+
+glm_pred_1se <- predict(glm, x_grid, s="lambda.1se")  %>%
+  as.data.frame() 
+colnames(glm_pred_1se)[1] <- "glm_lse"
+
+glm_grid <- bind_cols(grid, glm_pred_min, glm_pred_1se) %>%
+  gather("mod", "pred", 3:4)
+
+p3 <- ggplot(cars, aes(kmpl, price, color=type)) +
+  geom_point(size = 3) +
+  geom_line(aes(y = pred), data=glm_grid, size = 0.5) + 
+  facet_wrap(~mod)
+
+p3
+
+tidied_cv <- tidy(glm)
+tidied_cv
+glance_cv <- glance(glm)
+
+p3_cv <- ggplot(tidied_cv, aes(lambda, estimate)) + geom_line(color = "red") +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2) +
+    scale_x_log10() + 
+    geom_vline(xintercept = glance_cv$lambda.min) +
+    geom_vline(xintercept = glance_cv$lambda.1se, lty = 2)
+
+p3_cv
+```
+
+
+## [4] Visualise with *different input datasets*
+
+```{r}
+
+cars <- cars %>%
+  mutate(.id = "000")
+
+lm_function <- function(df) {
+  lm(price ~kmpl + type, data = df)
+}
+
+boot <- cars %>% 
+  modelr::bootstrap(100) %>%
+  mutate(model = map(strap, lm_function)) %>%
+  mutate(pred = map2(list(grid), model, add_predictions))
+
+p4 <- boot %>%
+  unnest(pred) %>%
+  ggplot(aes(kmpl, pred, group=.id, color=type)) +
+  geom_point(size = 0.1, alpha = 0.1) + 
+  geom_point(aes(kmpl, price, color = type), data=cars, size = 3)
+
+p4
+```
+
+## [5] Visualise the *entire model space*
+
+
+## [6] Visualise the *entire feature space*
+
+
+##[7] Visualise the *many models together*
+
+```{r}
+
+lm2 <- function(df) {
+  lm(price ~ kmpl, data = df)
+}
+
+grid2 <- cars %>%
+  data_grid(kmpl = seq_range(kmpl, 200))
+
+many_models <- cars %>%
+  group_by(type) %>%
+  nest() %>%
+  mutate(model = map(data, lm2))  %>%
+  mutate(pred = map2(list(grid2), model, add_predictions))
+
+
+p7 <- many_models %>%
+  unnest(pred) %>%
+  ggplot(aes(kmpl, pred, group=type, color=type)) +
+  geom_point(size = 1, alpha = 1) + 
+  geom_point(aes(kmpl, price, color = type), data=cars, size = 3)
+p7
+
+```
+
+## Extending for 5 types
+
+```{r}
+
+cars5 <- read_csv("cars_5.csv")
+
+grid5 <- cars %>%
+  data_grid(kmpl = seq_range(kmpl, 200))
+
+many_models5 <- cars5 %>%
+  group_by(type) %>%
+  nest() %>%
+  mutate(model = map(data, lm2))  %>%
+  mutate(pred = map2(list(grid2), model, add_predictions))
+
+
+p7_5 <- many_models5 %>%
+  unnest(pred) %>%
+  ggplot(aes(kmpl, pred, group=type, color=type)) +
+  geom_point(size = 1, alpha = 1) + 
+  geom_point(aes(kmpl, price, color = type), data=cars5, size = 3)
+
+p7_5
+```
+
+
+

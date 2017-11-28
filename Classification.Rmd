@@ -1,0 +1,102 @@
+---
+title: "ModelVis - Classification"
+author: "Biswajit Ojha"
+output: html_notebook
+---
+
+## Model Visualisation
+
+- [0] Visualise the *data space*
+- [1] Visualise the *predictions in the data space*
+- [2] Visualise the *errors in model fitting*
+- [3] Visualise with *different model parameters*
+- [4] Visualise with *different input datasets*
+- [5] Visualise the *entire model space*
+- [6] Visualise the *entire feature space*
+- [7] Visualise the *many models together*
+
+
+## Load the libraries
+
+```{r}
+library(broom)
+library(MASS)
+library(tidyverse)
+library(ggthemes)
+library(plotly)
+library(modelr)
+library(DT)
+library(ggrepel)
+library(rpart)
+```
+
+
+## Set the theme
+
+```{r}
+library(ggplot2)
+notebook_theme <- theme_fivethirtyeight() + 
+         theme( axis.title = element_text(), legend.position = "right",
+                  legend.direction = "vertical")
+theme_set(notebook_theme)
+```
+
+## Read the data
+
+```{r}
+setwd("D:/Analytics/Visualization")
+cars <- read.csv("cars.csv")
+head(cars)
+# datatable(cars, options = list())
+```
+
+## [0] Visualise the data space
+
+```{r}
+c0 <- ggplot(cars) + aes(bhp, price, size = kmpl, color = type) + 
+  geom_point()
+c0
+```
+
+## [1] Visualise the prediction in the data space
+
+Lets make a simple tree model
+
+```{r}
+tree <- rpart (type ~ kmpl + bhp + price, cars, method = "class")
+
+summary(tree)
+
+grid <- cars %>%
+  data_grid(kmpl = seq_range(kmpl, 25),
+                       bhp = seq_range(bhp, 25), price=seq_range(price,25))
+
+pred <- predict(tree, grid, type="prob") %>%
+        as.data.frame() %>%
+        dplyr::select(Hatchback)
+
+tree_grid <- bind_cols(grid, pred)
+colnames(tree_grid)[4] <- "pred"
+head(tree_grid) 
+  
+```
+
+# Plot the data
+
+```{r}
+p1 <- ggplot(tree_grid, aes(bhp, price, color=pred)) + geom_point(alpha=0.5) 
+p1
+
+```
+
+```{r}
+
+p <- plot_ly(tree_grid, x = ~kmpl, y = ~bhp, z = ~price, color = ~pred) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'kmpl'),
+                     yaxis = list(title = 'bhp'),
+                     zaxis = list(title = 'price')))
+p
+
+
+```
