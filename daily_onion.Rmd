@@ -1,0 +1,163 @@
+---
+title: "R Notebook"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+
+#frame
+
+Two questions
+1.Find the State with the highest quantity sales.
+2.Predict the daily price for the next 30 days for that state.
+
+#Acquire
+
+we have choosen to scrape data from nfhrd daily basis for 2017
+
+```{r}
+getwd()
+library(rvest)
+library(knitr)
+pg.out <- read_html('DailyWiseMarketArrivals.htm')
+pg.table <- pg.out %>%
+            html_node('#dnn_ctr966_DailyWiseMarketArrivals_GridView1') %>%
+            html_table()
+
+df <- pg.table
+str(df)
+
+dim(df)  
+
+ ```
+#refine
+
+-rename the column name
+
+```{r}
+newnames <- c('date','market','quantity','pricemin','pricemax','pricemod')
+colnames(df) = newnames
+str(df)
+```
+
+-remove last row
+
+```{r}
+library(dplyr)
+tail(df)
+
+df <- df %>%  filter(market != "Total") 
+
+tail(df)
+
+```
+
+-change the datatypes
+
+```{r}
+str(df)
+df$pricemin <- as.numeric(df$pricemin)
+df$pricemax <- as.numeric(df$pricemax)
+df$pricemod <- as.numeric(df$pricemod)
+df$date <- as.Date(df$date,format ="%d/%b/%Y")
+str(df)
+```
+
+-cleanup the city name
+
+```{r}
+library(stringr)
+library(tidyr)
+unique(df$market)
+
+df <- df %>%
+      mutate(market1= market) %>%
+      separate(market1, c('city', 'state'), sep="\\(")
+head(df)
+df$state <- df$state %>% str_replace("\\)","")
+str(df)
+
+# Also, we can drop the market column
+#df$market = NULL
+
+df <- df %>%
+      mutate(date1= date) %>%
+      separate(date1, c('year','month', 'day'), sep="\\-")
+head(df)
+str(df)
+unique(df$state)
+
+```
+
+# Transform
+
+
+```{r}
+library(dplyr)
+head(df)
+
+dfState2017 = df %>% group_by(state) %>%
+       summarise(quantity_state = sum(quantity)) %>%
+       arrange(desc(quantity_state))
+dfState2017[1,1]
+head(dfState2017)
+str(dfState2017)
+
+df.MS_Cities = df %>% group_by(state,city) %>%
+              summarise(Quantity=sum(quantity)) %>%  filter(state == 'MS') %>%
+                arrange(desc(Quantity))  %>% 
+               head(5)
+df.MS_Cities
+library(ggplot2)
+library(plotly)
+MS_City_plot = ggplot(df.MS_Cities) + aes(reorder(city,Quantity),weight =Quantity/1000,fill=city) + geom_bar() + coord_flip()    
+
+ggplotly(MS_City_plot)
+
+# Plotting it on map
+library(ggmap)
+geo =geocode(df.MS_Cities$city)
+
+df.MS_Cities = bind_cols(df.MS_Cities,geo)
+
+map=get_map("India",maptype="watercolor",source="stamen",zoom=5)
+ggmap(map)
+
+ggmap(map) + geom_point(data=df.MS_Cities,aes(lon,lat,size=Quantity,color=city))
+
+
+```
+
+
+#Explore--The data is presented in wide format,we have to convert it into tall format
+
+```{r}
+str(df)
+df.MS = df %>%          
+        filter(state=='MS',city==df.MS_Cities$city)%>%
+        select(date,pricemin,pricemod,pricemax,city,state) %>% 
+        gather('PriceType', 'Value',2:4) %>%
+        arrange(date)
+head(df.MS)
+Predict= ggplot(df.MS) + aes(date,Value,color=PriceType) +geom_line() +facet_grid(.~city)
+
+ggplotly(Predict)
+
+```
+
+```{r}
+df.Predict = df %>%
+             filter(state=='MS',pricemod!=0) %>%
+             group_by(date) %>%
+             summarise(State_Price=round(mean(pricemod))) %>%
+             arrange(date)
+colnames(df.Predict) = c('ds','y')
+library(prophet)
+m= prophet(df.Predict)
+future = make_future_dataframe(m,period=30)
+forecast =predict(m,future)
+ggplotly(plot(m,forecast))
+
+```
+
